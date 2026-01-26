@@ -1,0 +1,4 @@
+Token
+DOMAIN
+PORT
+UUID
