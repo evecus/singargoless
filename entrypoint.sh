@@ -17,7 +17,7 @@ cat <<EOF > /etc/sing-box.json
     {
       "type": "vless",
       "tag": "vless-in",
-      "listen": "::",
+      "listen": "127.0.0.1",
       "listen_port": ${LISTEN_PORT},
       "users": [{ "uuid": "${UUID}" }],
       "transport": {
