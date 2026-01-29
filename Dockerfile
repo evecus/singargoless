@@ -34,7 +34,7 @@ RUN set -eux; \
 # ---------- 第二阶段：运行 ----------
 FROM alpine:3.20
 
-RUN apk add --no-cache bash ca-certificates
+RUN apk add --no-cache bash ca-certificates curl
 
 COPY --from=builder /usr/local/bin/sing-box /usr/local/bin/
 COPY --from=builder /usr/local/bin/cloudflared /usr/local/bin/
