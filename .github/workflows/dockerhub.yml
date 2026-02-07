@@ -1,7 +1,7 @@
 name: 自动检测更新并构建镜像
 
 on:
-  workflow_dispatch: # 支持手动触发
+  workflow_dispatch:
   schedule:
     - cron: '0 0 */5 * *'
 
@@ -18,23 +18,15 @@ jobs:
       - name: Get Latest Versions
         id: get_version
         run: |
-          # 获取 sing-box 最新版本 (去掉 v)
           SB_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          # 获取 cloudflared 最新版本
           CF_VER=$(curl -s https://api.github.com/repos/cloudflare/cloudflared/releases/latest | jq -r '.tag_name')
-          
           echo "sb_ver=$SB_VER" >> $GITHUB_OUTPUT
           echo "cf_ver=$CF_VER" >> $GITHUB_OUTPUT
-          echo "当前最新: sing-box $SB_VER, cloudflared $CF_VER"
 
       - name: Calculate File Hashes
         id: get_hash
         run: |
-          # 计算 entrypoint.sh 和 Dockerfile 的哈希值并合并
-          # 这样只要这两个文件任何一个改了，哈希就会变
-          SCRIPT_HASH=$(md5sum entrypoint.sh | cut -d' ' -f1)
-          DOCKER_HASH=$(md5sum Dockerfile | cut -d' ' -f1)
-          COMBINED_HASH=$(echo "${SCRIPT_HASH}${DOCKER_HASH}" | md5sum | cut -d' ' -f1)
+          COMBINED_HASH=$(md5sum entrypoint.sh Dockerfile | md5sum | cut -d' ' -f1)
           echo "hash=$COMBINED_HASH" >> $GITHUB_OUTPUT
 
       - name: Restore Last Versions
@@ -44,26 +36,19 @@ jobs:
           path: version_record.txt
           key: version-cache-${{ runner.os }}
 
-      - name: Compare Versions and Hashes
+      - name: Compare
         id: compare
         run: |
-          # 现在的版本标识包含：sing-box版本 + cloudflared版本 + 脚本哈希
           NEW_ID="sb_${{ steps.get_version.outputs.sb_ver }}_cf_${{ steps.get_version.outputs.cf_ver }}_hash_${{ steps.get_hash.outputs.hash }}"
-          OLD_ID=""
-          if [ -f version_record.txt ]; then
-            OLD_ID=$(cat version_record.txt)
-          fi
-
+          OLD_ID=$([ -f version_record.txt ] && cat version_record.txt || echo "")
           if [ "$NEW_ID" != "$OLD_ID" ]; then
-            echo "检测到更新（版本或脚本已变）: $OLD_ID -> $NEW_ID"
             echo "$NEW_ID" > version_record.txt
             echo "update=true" >> $GITHUB_OUTPUT
           else
-            echo "版本与脚本均未变化，跳过构建。"
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Save New Version to Cache
+      - name: Save Cache
         if: steps.compare.outputs.update == 'true'
         uses: actions/cache/save@v4
         with:
@@ -90,15 +75,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract Docker metadata
+      - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
           tags: |
             type=raw,value=latest
-            type=sha
             type=raw,value=${{ needs.check-version.outputs.sb_ver }}
 
       - name: Build and Push
@@ -107,6 +90,8 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            SB_VER_TAG=${{ needs.check-version.outputs.sb_ver }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
