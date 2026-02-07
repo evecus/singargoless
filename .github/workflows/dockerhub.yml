@@ -11,6 +11,7 @@ jobs:
     outputs:
       needs_update: ${{ steps.compare.outputs.update }}
       sb_ver: ${{ steps.get_version.outputs.sb_ver }}
+      cf_ver: ${{ steps.get_version.outputs.cf_ver }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -26,17 +27,17 @@ jobs:
       - name: Calculate File Hashes
         id: get_hash
         run: |
+          # 同时计算 entrypoint 和 Dockerfile 的哈希
           COMBINED_HASH=$(md5sum entrypoint.sh Dockerfile | md5sum | cut -d' ' -f1)
           echo "hash=$COMBINED_HASH" >> $GITHUB_OUTPUT
 
-      - name: Restore Last Versions
-        id: restore_cache
+      - name: Restore Cache
         uses: actions/cache/restore@v4
         with:
           path: version_record.txt
           key: version-cache-${{ runner.os }}
 
-      - name: Compare
+      - name: Compare Versions and Hashes
         id: compare
         run: |
           NEW_ID="sb_${{ steps.get_version.outputs.sb_ver }}_cf_${{ steps.get_version.outputs.cf_ver }}_hash_${{ steps.get_hash.outputs.hash }}"
@@ -92,6 +93,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             SB_VER_TAG=${{ needs.check-version.outputs.sb_ver }}
+            CF_VER_TAG=${{ needs.check-version.outputs.cf_ver }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
