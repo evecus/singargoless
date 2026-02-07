@@ -10,7 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       needs_update: ${{ steps.compare.outputs.update }}
+      sb_ver: ${{ steps.get_version.outputs.sb_ver }}
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Get Latest Versions
         id: get_version
         run: |
@@ -23,6 +27,16 @@ jobs:
           echo "cf_ver=$CF_VER" >> $GITHUB_OUTPUT
           echo "当前最新: sing-box $SB_VER, cloudflared $CF_VER"
 
+      - name: Calculate File Hashes
+        id: get_hash
+        run: |
+          # 计算 entrypoint.sh 和 Dockerfile 的哈希值并合并
+          # 这样只要这两个文件任何一个改了，哈希就会变
+          SCRIPT_HASH=$(md5sum entrypoint.sh | cut -d' ' -f1)
+          DOCKER_HASH=$(md5sum Dockerfile | cut -d' ' -f1)
+          COMBINED_HASH=$(echo "${SCRIPT_HASH}${DOCKER_HASH}" | md5sum | cut -d' ' -f1)
+          echo "hash=$COMBINED_HASH" >> $GITHUB_OUTPUT
+
       - name: Restore Last Versions
         id: restore_cache
         uses: actions/cache/restore@v4
@@ -30,21 +44,22 @@ jobs:
           path: version_record.txt
           key: version-cache-${{ runner.os }}
 
-      - name: Compare Versions
+      - name: Compare Versions and Hashes
         id: compare
         run: |
-          NEW_VER="sb_${{ steps.get_version.outputs.sb_ver }}_cf_${{ steps.get_version.outputs.cf_ver }}"
-          OLD_VER=""
+          # 现在的版本标识包含：sing-box版本 + cloudflared版本 + 脚本哈希
+          NEW_ID="sb_${{ steps.get_version.outputs.sb_ver }}_cf_${{ steps.get_version.outputs.cf_ver }}_hash_${{ steps.get_hash.outputs.hash }}"
+          OLD_ID=""
           if [ -f version_record.txt ]; then
-            OLD_VER=$(cat version_record.txt)
+            OLD_ID=$(cat version_record.txt)
           fi
 
-          if [ "$NEW_VER" != "$OLD_VER" ]; then
-            echo "检测到版本更新: $OLD_VER -> $NEW_VER"
-            echo "$NEW_VER" > version_record.txt
+          if [ "$NEW_ID" != "$OLD_ID" ]; then
+            echo "检测到更新（版本或脚本已变）: $OLD_ID -> $NEW_ID"
+            echo "$NEW_ID" > version_record.txt
             echo "update=true" >> $GITHUB_OUTPUT
           else
-            echo "版本未变化，跳过构建。"
+            echo "版本与脚本均未变化，跳过构建。"
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
@@ -53,7 +68,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: version_record.txt
-          key: version-cache-${{ runner.os }}-${{ github.run_id }} # 强制更新缓存
+          key: version-cache-${{ runner.os }}-${{ github.run_id }}
 
   build-and-push:
     needs: check-version
@@ -84,7 +99,6 @@ jobs:
           tags: |
             type=raw,value=latest
             type=sha
-            # 也可以把版本号作为 tag
             type=raw,value=${{ needs.check-version.outputs.sb_ver }}
 
       - name: Build and Push
